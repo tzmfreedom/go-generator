@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/z7zmey/php-parser/node/expr/assign"
+
 	"github.com/z7zmey/php-parser/node/name"
 
 	"github.com/z7zmey/php-parser/node"
@@ -18,8 +20,10 @@ import (
 )
 
 type Generator struct {
-	Buffers []string
-	Imports map[string]struct{}
+	PackageName string
+	FuncName    string
+	Buffers     []string
+	Imports     map[string]struct{}
 }
 
 func Generate(src []byte, version string, debug bool) error {
@@ -48,7 +52,8 @@ func Generate(src []byte, version string, debug bool) error {
 
 func NewGenerator() *Generator {
 	return &Generator{
-		Imports: map[string]struct{}{},
+		PackageName: "hoge",
+		Imports:     map[string]struct{}{},
 	}
 }
 
@@ -60,6 +65,32 @@ func (d *Generator) EnterNode(w walker.Walkable) bool {
 		d.pushBuffer("fmt.Println(")
 		n.Exprs[0].Walk(d)
 		d.pushBuffer(")\n")
+		return false
+	case *stmt.Function:
+		d.pushBuffer("func ")
+		n.FunctionName.Walk(d)
+		d.pushBuffer("(")
+		for _, p := range n.Params {
+			p.Walk(d)
+		}
+		d.pushBuffer(") ")
+		if n.ReturnType != nil {
+			n.ReturnType.Walk(d)
+			d.pushBuffer(" ")
+		}
+		d.pushBuffer("{\n")
+		for _, s := range n.Stmts {
+			s.Walk(d)
+		}
+		d.pushBuffer("}\n")
+		return false
+	case *node.Parameter:
+		n.Variable.Walk(d)
+		d.pushBuffer(" ")
+		n.VariableType.Walk(d)
+		return false
+	case *node.Identifier:
+		d.pushBuffer(n.Value)
 		return false
 	case *scalar.Lnumber:
 		d.pushBuffer(n.Value)
@@ -85,7 +116,20 @@ func (d *Generator) EnterNode(w walker.Walkable) bool {
 	case *name.NamePart:
 		if n.Value == "PHP_EOL" {
 			d.pushBuffer(`"\n"`)
+		} else {
+			d.pushBuffer(n.Value)
 		}
+		return false
+	case *assign.Assign:
+		n.Variable.Walk(d)
+		d.pushBuffer(" := ")
+		n.Expression.Walk(d)
+		d.pushBuffer("\n")
+		return false
+	case *stmt.Return:
+		d.pushBuffer("return ")
+		n.Expr.Walk(d)
+		d.pushBuffer("\n")
 		return false
 	}
 	return true
@@ -106,9 +150,8 @@ func (d *Generator) Buffer() string {
 	}
 	buffers := d.Buffers
 	buffers = append([]string{
-		"package hoge\n\n",
+		fmt.Sprintf("package %s\n\n", d.PackageName),
 		importStmt,
-		"func main() {\n",
 	}, d.Buffers...)
 
 	return strings.Join(buffers, "")
@@ -125,7 +168,7 @@ func (d *Generator) pushBuffer(b string) {
 func (d *Generator) LeaveNode(w walker.Walkable) {
 	switch w.(type) {
 	case *node.Root:
-		d.pushBuffer("}")
+	case *stmt.Function:
 	}
 }
 
